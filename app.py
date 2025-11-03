@@ -1061,7 +1061,8 @@ def submit_assignment():
         # ✅ FIX: Verify assignment exists
         assignment = Assignment.query.get(assignment_id)
         if not assignment:
-            return jsonify({'error': 'Assignment not found'}), 404
+            print(f"❌ Assignment {assignment_id} not found in database")
+            return jsonify({'error': 'Assignment not found or has been deleted'}), 404
         
         # ✅ FIX: Verify student is enrolled in the class
         cls = Class.query.get(assignment.class_id)
@@ -1120,6 +1121,8 @@ def submit_assignment():
     except Exception as e:
         db.session.rollback()
         print(f"❌ Error saving submission: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': f'Failed to save submission: {str(e)}'}), 500
 
 @app.route('/api/student/unsubmit_assignment', methods=['POST'])
@@ -1654,6 +1657,34 @@ def get_student_class_assignments(class_id):
             "points": a.points
         } for a in assignments
     ])
+
+
+@app.route('/api/student/assignments/<int:assignment_id>/submit', methods=['POST'])
+def submit_student_assignment(assignment_id):
+    if 'user_id' not in session or session.get('user_type') != 'student':
+        return {"error": "Unauthorized"}, 401
+
+    assignment = Assignment.query.get(assignment_id)
+    if not assignment:
+        return {"error": "Assignment not found or has been deleted by professor"}, 404
+
+    if assignment.archived:
+        return {"error": "This assignment belongs to an archived class"}, 403
+
+    text = request.form.get('text', '')
+    file = request.files.get('file')
+
+    submission = Submission(
+        assignment_id=assignment_id,
+        student_id=session['user_id'],
+        text=text,
+        date=datetime.utcnow()
+    )
+
+    db.session.add(submission)
+    db.session.commit()
+
+    return jsonify({"success": True})
 
 
 @app.route('/api/student/assignments/<int:assignment_id>/submission')

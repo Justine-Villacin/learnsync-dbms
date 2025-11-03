@@ -3527,6 +3527,172 @@ function loadClassPosts() {
   });
 }
 
+// ✅ Enhanced Video Player with better controls
+function showVideoPlayer(filename, videoUrl) {
+  console.log('🎬 Opening video player:', filename);
+  
+  const existingModal = document.getElementById('video-player-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+  
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.style.display = 'flex';
+  modal.style.zIndex = '10001';
+  modal.id = 'video-player-modal';
+  
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width: 900px; max-height: 95vh; overflow: hidden;">
+      <div class="modal-header">
+        <h3><i class="fas fa-play-circle"></i> ${filename}</h3>
+        <button class="close-btn" onclick="closeVideoPlayer()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="modal-body" style="padding: 0; background: #000;">
+        <video 
+          id="assignment-video-player" 
+          controls 
+          style="width: 100%; max-height: 70vh; display: block;"
+          autoplay>
+          <source src="${videoUrl}" type="video/${filename.split('.').pop()}">
+          Your browser does not support the video tag.
+        </video>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem;">
+        <div style="display: flex; gap: 1rem; align-items: center;">
+          <button onclick="togglePlayPause()" class="btn-secondary" style="min-width: 100px;">
+            <i class="fas fa-pause" id="play-pause-icon"></i> <span id="play-pause-text">Pause</span>
+          </button>
+          <button onclick="toggleFullscreen()" class="btn-secondary">
+            <i class="fas fa-expand"></i> Fullscreen
+          </button>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button onclick="changePlaybackSpeed(-0.25)" class="btn-outline" title="Slower">
+            <i class="fas fa-backward"></i>
+          </button>
+          <span id="playback-speed" style="padding: 0.5rem 1rem; background: #f8f9fa; border-radius: 6px; font-weight: 600;">1.0x</span>
+          <button onclick="changePlaybackSpeed(0.25)" class="btn-outline" title="Faster">
+            <i class="fas fa-forward"></i>
+          </button>
+        </div>
+        <a href="${videoUrl}" download="${filename}" class="btn-primary" style="text-decoration: none;">
+          <i class="fas fa-download"></i> Download
+        </a>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      closeVideoPlayer();
+    }
+  });
+  
+  document.addEventListener('keydown', videoKeyboardHandler);
+}
+
+function closeVideoPlayer() {
+  const modal = document.getElementById('video-player-modal');
+  if (modal) {
+    const video = document.getElementById('assignment-video-player');
+    if (video) {
+      video.pause();
+    }
+    modal.remove();
+    document.removeEventListener('keydown', videoKeyboardHandler);
+  }
+}
+
+function togglePlayPause() {
+  const video = document.getElementById('assignment-video-player');
+  const icon = document.getElementById('play-pause-icon');
+  const text = document.getElementById('play-pause-text');
+  
+  if (video.paused) {
+    video.play();
+    icon.className = 'fas fa-pause';
+    text.textContent = 'Pause';
+  } else {
+    video.pause();
+    icon.className = 'fas fa-play';
+    text.textContent = 'Play';
+  }
+}
+
+function toggleFullscreen() {
+  const video = document.getElementById('assignment-video-player');
+  
+  if (!document.fullscreenElement) {
+    if (video.requestFullscreen) {
+      video.requestFullscreen();
+    } else if (video.webkitRequestFullscreen) {
+      video.webkitRequestFullscreen();
+    } else if (video.msRequestFullscreen) {
+      video.msRequestFullscreen();
+    }
+  } else {
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    }
+  }
+}
+
+function changePlaybackSpeed(delta) {
+  const video = document.getElementById('assignment-video-player');
+  const speedDisplay = document.getElementById('playback-speed');
+  
+  let newSpeed = video.playbackRate + delta;
+  newSpeed = Math.max(0.25, Math.min(2.0, newSpeed));
+  
+  video.playbackRate = newSpeed;
+  speedDisplay.textContent = newSpeed.toFixed(2) + 'x';
+}
+
+function videoKeyboardHandler(e) {
+  const video = document.getElementById('assignment-video-player');
+  if (!video) return;
+  
+  switch(e.key) {
+    case ' ':
+    case 'k':
+      e.preventDefault();
+      togglePlayPause();
+      break;
+    case 'f':
+      e.preventDefault();
+      toggleFullscreen();
+      break;
+    case 'ArrowLeft':
+      e.preventDefault();
+      video.currentTime -= 5;
+      break;
+    case 'ArrowRight':
+      e.preventDefault();
+      video.currentTime += 5;
+      break;
+    case 'ArrowUp':
+      e.preventDefault();
+      video.volume = Math.min(1, video.volume + 0.1);
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      video.volume = Math.max(0, video.volume - 0.1);
+      break;
+    case 'm':
+      e.preventDefault();
+      video.muted = !video.muted;
+      break;
+    case 'Escape':
+      closeVideoPlayer();
+      break;
+  }
+}
+
 // Load class assignments
 // REPLACE loadClassAssignments function to remove per-student extend buttons
 function loadClassAssignments(isArchived = false) {
@@ -3792,7 +3958,7 @@ function resetUploadForm() {
 }
 
 // Load class students
-function loadClassStudents() {
+async function loadClassStudents() {
   const classItem = classes.find(c => c.id === currentClassId);
   const studentsList = document.getElementById('students-list');
   
@@ -3818,7 +3984,8 @@ function loadClassStudents() {
     return nameA.localeCompare(nameB);
   });
   
-  sortedStudents.forEach(student => {
+  // ✅ Load avatars for all students
+  for (const student of sortedStudents) {
     const studentDatabaseId = String(student.id);
     const studentDisplayId = student.student_id || student.id;
     
@@ -3826,7 +3993,6 @@ function loadClassStudents() {
     let completedAssignments = 0;
     let totalGrade = 0;
     let gradedAssignments = 0;
-
     
     if (classItem.assignments) {
       classItem.assignments.forEach(assignment => {
@@ -3851,30 +4017,20 @@ function loadClassStudents() {
       `${student.first_name || ''} ${student.last_name || ''}`.trim() || 'Student';
     const studentEmail = student.email || student.username || 'N/A';
     
-// ✅ ENHANCED: Try multiple avatar sources
-    let avatarUrl = null;
+    // ✅ Load avatar from DATABASE
+    let avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(studentName)}&background=4a90a4&color=fff`;
     
-    // Try student-specific avatar first
-    // ✅ NEW CODE - REPLACE WITH THIS:
-    const possibleAvatarKeys = [
-      `avatar_student_${studentDatabaseId}`,  // ← NEW PRIORITY KEY
-      `student_avatar_${studentDatabaseId}`,
-      `student_avatar`,
-      'avatar'
-    ];
-    
-    for (const key of possibleAvatarKeys) {
-      const savedAvatar = localStorage.getItem(key);
-      if (savedAvatar && savedAvatar.startsWith('data:image')) {
-        avatarUrl = savedAvatar;
-        console.log(`✅ Found avatar for ${studentName} using key: ${key}`);
-        break;
+    try {
+      const response = await fetch(`/api/profile/avatar/student/${studentDatabaseId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.avatar) {
+          avatarUrl = data.avatar;
+          console.log(`✅ Loaded avatar for ${studentName}`);
+        }
       }
-    }
-    
-    // Default avatar if none found
-    if (!avatarUrl) {
-      avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(studentName)}&background=4a90a4&color=fff`;
+    } catch (e) {
+      console.error('Error loading student avatar:', e);
     }
     
     const studentElement = document.createElement('div');
@@ -3882,7 +4038,8 @@ function loadClassStudents() {
     studentElement.innerHTML = `
       <div class="student-info">
         <img src="${avatarUrl}" 
-             alt="${studentName}" class="avatar"
+             alt="${studentName}" 
+             class="avatar"
              onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(studentName)}&background=4a90a4&color=fff'">
         <div>
           <h4>${studentName}</h4>
@@ -3907,7 +4064,7 @@ function loadClassStudents() {
       </div>
     `;
     studentsList.appendChild(studentElement);
-  });
+  }
 }
 
 
@@ -5197,45 +5354,61 @@ function downloadCSV(content, filename) {
 }
 
 // Download file
-//PROFESSOR VERSION: Enhanced downloadFile with VIDEO PLAYER
 function downloadFile(filename, urlOrContent) {
-  console.log('ðŸ“¥ Downloading/Playing file:', filename);
+  console.log('📥 Downloading/Playing file:', filename);
   
   // Check if it's a video file
   const videoExtensions = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'];
   const fileExtension = filename.split('.').pop().toLowerCase();
   const isVideo = videoExtensions.includes(fileExtension);
   
-  // If video, show player modal
-  if (isVideo && urlOrContent && urlOrContent.startsWith('/uploads/')) {
-    showVideoPlayerProfessor(filename, urlOrContent);
+  // ✅ If video, show player instead of downloading
+  if (isVideo) {
+    showVideoPlayer(filename, urlOrContent);
     return;
   }
   
-  // Regular download for non-video
+  // ✅ For regular files, trigger download
   if (urlOrContent && urlOrContent.startsWith('/uploads/')) {
+    // Server-hosted file
     const link = document.createElement('a');
     link.href = urlOrContent;
     link.download = filename;
     link.target = '_blank';
+    
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
-  } else if (urlOrContent && urlOrContent.startsWith('data:')) {
+    
+    setTimeout(() => {
+      document.body.removeChild(link);
+    }, 100);
+    
+    return;
+  }
+  
+  if (urlOrContent && urlOrContent.startsWith('data:')) {
+    // Base64 encoded file
     try {
       const link = document.createElement('a');
       link.href = urlOrContent;
       link.download = filename;
+      
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
+      
+      setTimeout(() => {
+        document.body.removeChild(link);
+      }, 100);
+      
     } catch (e) {
-      console.error('Error downloading file:', e);
+      console.error('❌ Error downloading file:', e);
       alert('Error downloading file: ' + e.message);
     }
-  } else {
-    alert('Invalid file format. Please contact support.');
+    return;
   }
+  
+  console.error('❌ Invalid file format:', urlOrContent ? urlOrContent.substring(0, 50) : 'empty');
+  alert('⚠️ Invalid file format. Please contact your professor.');
 }
 
 // VIDEO PLAYER for professors
@@ -5999,12 +6172,11 @@ function showMessage(message, type) {
   }, 5000);
 }
 
-// Load all students across all classes for the Students section
-function loadAllStudents() {
+async function loadAllStudents() {
   const allStudentsList = document.getElementById('all-students-list');
   if (!allStudentsList) return;
   
-  allStudentsList.innerHTML = '';
+  allStudentsList.innerHTML = '<div style="text-align: center; padding: 2rem;"><i class="fas fa-spinner fa-spin" style="font-size: 2rem;"></i><p>Loading students...</p></div>';
   
   const studentMap = new Map();
   
@@ -6040,12 +6212,59 @@ function loadAllStudents() {
     return;
   }
   
-  //SORT STUDENTS ALPHABETICALLY BY NAME
+  // SORT STUDENTS ALPHABETICALLY BY NAME
   allStudents.sort((a, b) => {
     const nameA = (a.name || `${a.first_name || ''} ${a.last_name || ''}`.trim()).toLowerCase();
     const nameB = (b.name || `${b.first_name || ''} ${b.last_name || ''}`.trim()).toLowerCase();
     return nameA.localeCompare(nameB);
   });
+  
+  allStudentsList.innerHTML = '';
+  
+  // ✅ Load avatars for all students
+  for (const student of allStudents) {
+    const studentName = student.name || `${student.first_name || ''} ${student.last_name || ''}`.trim() || 'Student';
+    const studentEmail = student.email || student.username || 'N/A';
+    const studentId = student.student_id || student.id || 'N/A';
+    const studentDatabaseId = String(student.id || student.student_id);
+    
+    // ✅ Load avatar from DATABASE
+    let avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(studentName)}&background=4a90a4&color=fff`;
+    
+    try {
+      const response = await fetch(`/api/profile/avatar/student/${studentDatabaseId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.avatar) {
+          avatarUrl = data.avatar;
+        }
+      }
+    } catch (e) {
+      console.error('Error loading student avatar:', e);
+    }
+    
+    const studentElement = document.createElement('div');
+    studentElement.className = 'student-item';
+    studentElement.innerHTML = `
+      <div class="student-info">
+        <img src="${avatarUrl}" 
+             alt="${studentName}" 
+             class="avatar"
+             onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(studentName)}&background=4a90a4&color=fff'">
+        <div>
+          <h4>${studentName}</h4>
+          <p>${studentId} • ${studentEmail}</p>
+          <p style="font-size: 0.85rem; color: var(--text-light); margin-top: 0.25rem;">
+            Enrolled in: ${student.classes.join(', ')}
+          </p>
+        </div>
+      </div>
+      <div class="student-stats">
+        <span>${student.classes.length} Class${student.classes.length !== 1 ? 'es' : ''}</span>
+      </div>
+    `;
+    allStudentsList.appendChild(studentElement);
+  }
   
   const searchInput = document.getElementById('students-search');
   if (searchInput) {
@@ -6054,9 +6273,9 @@ function loadAllStudents() {
       filterStudents(allStudents, searchTerm);
     });
   }
-  
-  renderStudentsList(allStudents);
 }
+  
+
 
 // Render students list
 function renderStudentsList(students) {

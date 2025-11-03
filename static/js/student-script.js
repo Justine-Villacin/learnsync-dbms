@@ -667,6 +667,7 @@ document.addEventListener('DOMContentLoaded', async function() {
   document.getElementById('cancel-join-class').addEventListener('click', hideJoinClassModal);
   document.getElementById('join-class').addEventListener('click', joinClass);
 
+  // ✅ FIX: Close submission modal button
   const closeSubmissionModal = document.getElementById('close-submission-modal');
   if (closeSubmissionModal) {
     closeSubmissionModal.addEventListener('click', function() {
@@ -676,6 +677,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         document.getElementById('submission-text').value = '';
         document.getElementById('submission-files').value = '';
         document.getElementById('submission-files-chosen').textContent = 'No files selected';
+        
+        // Clear modal data
+        modal.dataset.assignmentId = '';
+        modal.dataset.classId = '';
+        modal.dataset.isResubmit = '';
+        modal.dataset.previousSubmitDate = '';
       }
     });
   }
@@ -687,44 +694,33 @@ document.addEventListener('DOMContentLoaded', async function() {
     const newSubmitBtn = submitBtn.cloneNode(true);
     submitBtn.parentNode.replaceChild(newSubmitBtn, submitBtn);
     
+    // Add fresh listener
     newSubmitBtn.addEventListener('click', async function(e) {
       e.preventDefault();
       e.stopPropagation();
       
-      console.log('📤 Submit button clicked');
+      console.log('🔵 Submit button clicked');
       
       if (this.disabled) {
         console.log('⚠️ Button already disabled');
         return;
       }
       
-      // Disable button immediately
-      this.disabled = true;
-      const originalHTML = this.innerHTML;
-      this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
-      
-      try {
-        await submitAssignment();
-        console.log('✅ Submission successful');
-      } catch (error) {
-        console.error('❌ Submission error:', error);
-        alert('❌ Error: ' + error.message);
-        
-        // Re-enable button on error
-        this.disabled = false;
-        this.innerHTML = originalHTML;
-      }
+      // Call the submit function
+      await submitAssignment();
     });
     
     console.log('✅ Submit button listener attached');
+  } else {
+    console.error('❌ Submit button not found in DOM');
   }
   
+  // ✅ FIX: File input display
   const submissionFiles = document.getElementById('submission-files');
   if (submissionFiles) {
     submissionFiles.addEventListener('change', function() {
       const fileChosen = document.getElementById('submission-files-chosen');
       if (this.files.length > 0) {
-        const fileNames = Array.from(this.files).map(f => f.name).join(', ');
         fileChosen.textContent = `${this.files.length} file(s) selected`;
       } else {
         fileChosen.textContent = 'No files selected';
@@ -732,70 +728,111 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
   }
 
-  // ✅ REPLACE WITH THIS CODE:
-  const avatarUpload = document.getElementById('avatar-upload');
-  const profileAvatar = document.getElementById('profile-avatar');
-  const topbarAvatar = document.getElementById('topbar-avatar');
+// ✅ REPLACE THIS ENTIRE SECTION
+const avatarUpload = document.getElementById('avatar-upload');
+const profileAvatar = document.getElementById('profile-avatar');
+const topbarAvatar = document.getElementById('topbar-avatar');
 
-  const userType = 'student';
+const userType = 'student';
 
-  // ✅ Load saved avatar
-  const savedAvatar = localStorage.getItem(`${userType}_avatar`);
-  if (savedAvatar && profileAvatar && topbarAvatar) {
-    profileAvatar.src = savedAvatar;
-    topbarAvatar.src = savedAvatar;
+// ✅ Load avatar from database on page load
+async function loadAvatarFromDatabase() {
+  try {
+    const response = await fetch(`/api/profile/avatar/${userType}/${studentData.id}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.avatar && profileAvatar && topbarAvatar) {
+        profileAvatar.src = data.avatar;
+        topbarAvatar.src = data.avatar;
+        // Also save to localStorage as cache
+        localStorage.setItem(`${userType}_avatar`, data.avatar);
+      }
+    }
+  } catch (e) {
+    console.error('Error loading avatar:', e);
   }
+}
 
-  if (avatarUpload && profileAvatar && topbarAvatar) {
-    const newAvatarUpload = avatarUpload.cloneNode(true);
-    avatarUpload.parentNode.replaceChild(newAvatarUpload, avatarUpload);
+// Load avatar when page loads
+if (studentData && studentData.id) {
+  loadAvatarFromDatabase();
+}
+
+// Load from localStorage as fallback (instant display while fetching from DB)
+const savedAvatar = localStorage.getItem(`${userType}_avatar`);
+if (savedAvatar && profileAvatar && topbarAvatar) {
+  profileAvatar.src = savedAvatar;
+  topbarAvatar.src = savedAvatar;
+}
+
+if (avatarUpload && profileAvatar && topbarAvatar) {
+  const newAvatarUpload = avatarUpload.cloneNode(true);
+  avatarUpload.parentNode.replaceChild(newAvatarUpload, avatarUpload);
+  
+  newAvatarUpload.addEventListener('change', async function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
     
-    newAvatarUpload.addEventListener('change', function(e) {
-      const file = e.target.files[0];
-      if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file (JPG, PNG, GIF)');
+      return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image size must be less than 5MB');
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      const avatarData = e.target.result;
       
-      if (!file.type.startsWith('image/')) {
-        alert('Please select an image file (JPG, PNG, GIF)');
-        return;
-      }
+      // ✅ Update UI immediately
+      profileAvatar.src = avatarData;
+      topbarAvatar.src = avatarData;
       
-      if (file.size > 5 * 1024 * 1024) {
-        alert('Image size must be less than 5MB');
-        return;
-      }
-      
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const avatarData = e.target.result;
+      try {
+        // ✅ Save to DATABASE (not just localStorage)
+        const response = await fetch('/api/profile/update-avatar', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            avatar: avatarData
+          })
+        });
         
-        // ✅ Update both avatars
-        profileAvatar.src = avatarData;
-        topbarAvatar.src = avatarData;
-        
-        try {
-          // ✅ Save to MULTIPLE keys for professor visibility
-          localStorage.setItem(`${userType}_avatar`, avatarData);
-          localStorage.setItem(`${userType}_avatar_${studentData.id}`, avatarData);
-          localStorage.setItem(`avatar_student_${studentData.id}`, avatarData); // ← NEW KEY
-          
-          showSuccessToast('Profile Picture Updated!', 'Your avatar has been saved successfully');
-          
-        } catch (error) {
-          if (error.name === 'QuotaExceededError') {
-            alert('Storage full. Please choose a smaller image.');
-          } else {
-            alert('Error saving: ' + error.message);
-          }
+        if (!response.ok) {
+          throw new Error('Failed to save avatar');
         }
-      };
-      
-      reader.onerror = function() {
-        alert('Error reading file. Please try again.');
-      };
-      
-      reader.readAsDataURL(file);
-    });
-  }
+        
+        const result = await response.json();
+        console.log('✅ Avatar saved to database:', result);
+        
+        // ✅ Also save to localStorage as cache
+        localStorage.setItem(`${userType}_avatar`, avatarData);
+        
+        showSuccessToast('Profile Picture Updated!', 'Your avatar has been saved and is now visible to professors');
+        
+      } catch (error) {
+        console.error('❌ Error saving avatar:', error);
+        
+        if (error.name === 'QuotaExceededError') {
+          alert('Storage full. Please choose a smaller image.');
+        } else {
+          alert('Error saving avatar: ' + error.message);
+        }
+      }
+    };
+    
+    reader.onerror = function() {
+      alert('Error reading file. Please try again.');
+    };
+    
+    reader.readAsDataURL(file);
+  });
+}
   
   // Settings tabs
   document.querySelectorAll('.settings-tab').forEach(tab => {
@@ -1885,7 +1922,6 @@ function loadClassPosts() {
   
   postsContainer.innerHTML = '';
   
-  // ✅ FIX: Materials are already loaded from database, no need for localStorage
   if (!classItem.materials || classItem.materials.length === 0) {
     postsContainer.innerHTML = `
       <div class="empty-state">
@@ -1897,7 +1933,6 @@ function loadClassPosts() {
     return;
   }
   
-  // Sort by date (newest first)
   const sortedMaterials = [...classItem.materials].sort((a, b) => 
     new Date(b.date) - new Date(a.date)
   );
@@ -1905,6 +1940,114 @@ function loadClassPosts() {
   sortedMaterials.forEach(material => {
     const postElement = document.createElement('div');
     postElement.className = 'post-card';
+    
+    let filesHTML = '';
+    
+    // ✅ Separate videos, files, and process resource link
+    if (material.files && material.files.length > 0) {
+      const videoExtensions = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'];
+      const videos = [];
+      const otherFiles = [];
+      
+      material.files.forEach(file => {
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+        if (videoExtensions.includes(fileExtension)) {
+          videos.push(file);
+        } else {
+          otherFiles.push(file);
+        }
+      });
+      
+      // ✅ Display Videos with Player
+      if (videos.length > 0) {
+        filesHTML += `
+          <div class="post-videos" style="margin: 1.5rem 0; padding: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">
+            <strong style="color: white; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 1.1rem;">
+              <i class="fas fa-video"></i> Video Resources (${videos.length}):
+            </strong>
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+              ${videos.map(file => {
+                const fileSource = file.url || file.content || '';
+                const escapedName = file.name.replace(/'/g, "\\'");
+                const escapedSource = fileSource.replace(/'/g, "\\'");
+                const fileSize = file.size ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : 'Video file';
+                
+                return `
+                  <button 
+                    onclick="showVideoPlayer('${escapedName}', '${escapedSource}')" 
+                    style="display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; background: rgba(255, 255, 255, 0.95); border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; text-align: left; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+                    onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)'"
+                    onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'">
+                    <div style="width: 50px; height: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                      <i class="fas fa-play" style="color: white; font-size: 1.5rem;"></i>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                      <div style="font-weight: 600; color: #2d3748; font-size: 1rem; margin-bottom: 0.25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        ${file.name}
+                      </div>
+                      <div style="color: #718096; font-size: 0.875rem;">
+                        ${fileSize}
+                      </div>
+                    </div>
+                    <i class="fas fa-chevron-right" style="color: #cbd5e0; font-size: 1.2rem;"></i>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }
+      
+      // ✅ Display Other Files (Downloadable)
+      if (otherFiles.length > 0) {
+        filesHTML += `
+          <div class="post-files" style="margin: 1.5rem 0;">
+            <strong style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; color: #333;">
+              <i class="fas fa-paperclip"></i> Attached Files (${otherFiles.length}):
+            </strong>
+            <div style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
+              ${otherFiles.map(file => {
+                const fileSource = file.url || file.content || '';
+                const escapedName = file.name.replace(/'/g, "\\'");
+                const escapedSource = fileSource.replace(/'/g, "\\'");
+                const fileSize = file.size ? ` (${(file.size / 1024 / 1024).toFixed(2)}MB)` : '';
+                
+                return `
+                  <a href="#" 
+                    onclick="downloadFile('${escapedName}', '${escapedSource}'); return false;" 
+                    style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; background: #e8f4f8; color: #4a90a4; text-decoration: none; border-radius: 6px; font-size: 0.9rem; font-weight: 500; transition: all 0.2s ease;"
+                    onmouseover="this.style.background='#d0e8f0'; this.style.transform='translateY(-2px)'"
+                    onmouseout="this.style.background='#e8f4f8'; this.style.transform='translateY(0)'">
+                    <i class="fas fa-download"></i> ${file.name}${fileSize}
+                  </a>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }
+    }
+    
+    // ✅ Display Resource Link (Clickable)
+    let resourceLinkHTML = '';
+    if (material.resourceLink) {
+      resourceLinkHTML = `
+        <div class="post-link" style="margin: 1.5rem 0; padding: 1rem; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 8px;">
+          <strong style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; color: #856404;">
+            <i class="fas fa-link"></i> Resource Link:
+          </strong>
+          <a href="${material.resourceLink}" 
+             target="_blank" 
+             rel="noopener noreferrer"
+             style="color: #0066cc; text-decoration: none; word-break: break-all; font-weight: 500;"
+             onmouseover="this.style.textDecoration='underline'"
+             onmouseout="this.style.textDecoration='none'">
+            <i class="fas fa-external-link-alt"></i> ${material.resourceLink}
+          </a>
+        </div>
+      `;
+    }
+    
     postElement.innerHTML = `
       <div class="post-header">
         <h4>${material.title}</h4>
@@ -1912,21 +2055,8 @@ function loadClassPosts() {
       </div>
       <p class="post-description">${material.description}</p>
       ${material.deadline ? `<p class="post-deadline"><strong>Deadline:</strong> ${new Date(material.deadline).toLocaleDateString()}</p>` : ''}
-      ${material.resourceLink ? `<p class="post-link"><a href="${material.resourceLink}" target="_blank">${material.resourceLink}</a></p>` : ''}
-      ${material.files && material.files.length > 0 ? `
-        <div class="post-files">
-          <strong>Attached Files:</strong>
-          <ul>
-            ${material.files.map(file => `
-              <li>
-                <a href="#" onclick="downloadFile('${file.name.replace(/'/g, "\\'")}', '${file.url || file.content}'); return false;">
-                  <i class="fas fa-download"></i> ${file.name} ${file.size ? `(${(file.size / 1024 / 1024).toFixed(2)}MB)` : ''}
-                </a>
-              </li>
-            `).join('')}
-          </ul>
-        </div>
-      ` : ''}
+      ${resourceLinkHTML}
+      ${filesHTML}
     `;
     postsContainer.appendChild(postElement);
   });
@@ -2021,7 +2151,7 @@ function loadClassAssignments(isArchived = false) {
       ${videoFiles.length > 0 ? `
         <div class="assignment-videos" style="margin: 1.5rem 0; padding: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);">
           <strong style="color: white; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 1.1rem;">
-            <i class="fas fa-video"></i> Video Resources:
+            <i class="fas fa-video"></i> Video Resources (${videoFiles.length}):
           </strong>
           <div style="display: flex; flex-direction: column; gap: 0.75rem;">
             ${videoFiles.map(file => {
@@ -2031,7 +2161,7 @@ function loadClassAssignments(isArchived = false) {
               
               return `
                 <button 
-                  onclick="downloadFile('${escapedName}', '${escapedSource}')" 
+                  onclick="showVideoPlayer('${escapedName}', '${escapedSource}')" 
                   style="display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; background: rgba(255, 255, 255, 0.95); border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; text-align: left; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
                   onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.2)'"
                   onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)'">
@@ -2053,25 +2183,29 @@ function loadClassAssignments(isArchived = false) {
           </div>
         </div>
       ` : ''}
-      
+
       ${otherFiles.length > 0 ? `
-        <div class="assignment-files">
-          <strong>Other Resources:</strong>
-          <ul>
+        <div class="assignment-files" style="margin: 1.5rem 0;">
+          <strong style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+            <i class="fas fa-paperclip"></i> Other Resources (${otherFiles.length}):
+          </strong>
+          <div style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
             ${otherFiles.map(file => {
               const fileSource = file.url || file.content || '';
               const escapedName = file.name.replace(/'/g, "\\'");
               const escapedSource = fileSource.replace(/'/g, "\\'");
               
               return `
-                <li>
-                  <a href="#" onclick="downloadFile('${escapedName}', '${escapedSource}'); return false;">
-                    <i class="fas fa-download"></i> ${file.name}
-                  </a>
-                </li>
+                <a href="#" 
+                  onclick="downloadFile('${escapedName}', '${escapedSource}'); return false;" 
+                  style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; background: #e8f4f8; color: #4a90a4; text-decoration: none; border-radius: 6px; font-size: 0.9rem; font-weight: 500; transition: all 0.2s ease;"
+                  onmouseover="this.style.background='#d0e8f0'; this.style.transform='translateY(-2px)'"
+                  onmouseout="this.style.background='#e8f4f8'; this.style.transform='translateY(0)'">
+                  <i class="fas fa-download"></i> ${file.name}
+                </a>
               `;
             }).join('')}
-          </ul>
+          </div>
         </div>
       ` : ''}
       
@@ -2105,7 +2239,7 @@ function loadClassAssignments(isArchived = false) {
   });
 }
 
-function openSubmissionModal(assignmentId) {
+async function openSubmissionModal(assignmentId) {
   console.log('📝 Opening submission modal for assignment:', assignmentId);
   
   const classItem = enrolledClasses.find(c => c.id === currentClassId);
@@ -2114,25 +2248,27 @@ function openSubmissionModal(assignmentId) {
     return;
   }
   
-  // ✅ FIX: Load fresh assignment data from professor's localStorage
-  const professorClasses = localStorage.getItem('professor_classes');
-  let assignment = null;
-  
-  if (professorClasses) {
-    try {
-      const profClasses = JSON.parse(professorClasses);
-      const matchingClass = profClasses.find(pc => pc.code === classItem.code);
-      if (matchingClass && matchingClass.assignments) {
-        assignment = matchingClass.assignments.find(a => String(a.id) === String(assignmentId));
-      }
-    } catch (e) {
-      console.error('Error loading professor data:', e);
-    }
+  // ✅ Check if class is archived FIRST
+  if (classItem.archived) {
+    alert('❌ Cannot submit to archived class');
+    return;
   }
   
-  // Fallback to class assignments
-  if (!assignment && classItem.assignments) {
-    assignment = classItem.assignments.find(a => String(a.id) === String(assignmentId));
+  // ✅ Load fresh assignment data from DATABASE
+  let assignment = null;
+  try {
+    const assignmentsResponse = await fetch(`/api/professor/classes/${currentClassId}/assignments`);
+    if (assignmentsResponse.ok) {
+      const assignments = await assignmentsResponse.json();
+      assignment = assignments.find(a => String(a.id) === String(assignmentId));
+      
+      if (assignment) {
+        console.log('✅ Found assignment from database:', assignment.title);
+        classItem.assignments = assignments;
+      }
+    }
+  } catch (e) {
+    console.error('❌ Error loading assignments:', e);
   }
   
   if (!assignment) {
@@ -2142,25 +2278,24 @@ function openSubmissionModal(assignmentId) {
   
   console.log('✅ Assignment found:', assignment.title);
   
-  // ✅ Check if assignment is overdue
+  // Check if assignment is overdue
   const dueDate = new Date(assignment.dueDate);
   const now = new Date();
   
   if (now > dueDate) {
-    alert(`⏰ This assignment is overdue!\n\nDeadline was: ${dueDate.toLocaleString()}\n\nYou cannot submit past the deadline. Please contact your professor if you need an extension.`);
-    return;
-  }
-  
-  // Check if already submitted
-  const existingSubmission = assignment.submissions ? 
-    assignment.submissions.find(s => String(s.studentId) === String(studentData.id)) : null;
-  
-  if (existingSubmission) {
-    const confirmResubmit = confirm(`⚠️ You have already submitted this assignment.\n\nSubmitted on: ${new Date(existingSubmission.date).toLocaleString()}\n\nDo you want to resubmit? This will replace your previous submission.`);
-    if (!confirmResubmit) {
+    const confirmSubmit = confirm(
+      `⏰ This assignment is overdue!\n\n` +
+      `Deadline was: ${dueDate.toLocaleString()}\n\n` +
+      `You can still submit, but it's marked as late. Continue?`
+    );
+    if (!confirmSubmit) {
       return;
     }
   }
+  
+  // Check if already submitted - store info but don't block
+  const existingSubmission = assignment.submissions ? 
+    assignment.submissions.find(s => String(s.studentId) === String(studentData.id)) : null;
   
   const modal = document.getElementById('submission-modal');
   if (!modal) {
@@ -2168,19 +2303,31 @@ function openSubmissionModal(assignmentId) {
     return;
   }
   
-  // ✅ FIX: Store both assignment ID and class ID in modal dataset
+  // ✅ Store data in modal
   modal.dataset.assignmentId = String(assignmentId);
   modal.dataset.classId = String(currentClassId);
+  modal.dataset.isResubmit = existingSubmission ? 'true' : 'false';
+  if (existingSubmission) {
+    modal.dataset.previousSubmitDate = existingSubmission.date;
+  }
   
   console.log('✅ Modal dataset set:', {
     assignmentId: modal.dataset.assignmentId,
-    classId: modal.dataset.classId
+    classId: modal.dataset.classId,
+    isResubmit: modal.dataset.isResubmit
   });
   
   // Clear form
   document.getElementById('submission-text').value = '';
   document.getElementById('submission-files').value = '';
   document.getElementById('submission-files-chosen').textContent = 'No files selected';
+  
+  // ✅ Reset submit button state
+  const submitBtn = document.getElementById('submit-assignment');
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Assignment';
+  }
   
   modal.style.display = 'flex';
   
@@ -2192,178 +2339,225 @@ function openSubmissionModal(assignmentId) {
 }
 
 async function submitAssignment() {
-    console.log('📤 SUBMIT ASSIGNMENT - Starting submission process');
-    
-    const modal = document.getElementById('submission-modal');
-    if (!modal) {
-        console.error('❌ Modal not found');
-        alert('Error: Submission form not found');
-        return;
+  console.log('📤 SUBMIT ASSIGNMENT - Starting submission process');
+  
+  const modal = document.getElementById('submission-modal');
+  if (!modal) {
+    console.error('❌ Modal not found');
+    alert('Error: Submission form not found');
+    return;
+  }
+
+  const assignmentId = modal.dataset.assignmentId;
+  const classId = modal.dataset.classId || currentClassId;
+  const submissionText = document.getElementById('submission-text').value.trim();
+  const filesInput = document.getElementById('submission-files');
+  const isResubmit = modal.dataset.isResubmit === 'true';
+  const previousSubmitDate = modal.dataset.previousSubmitDate;
+
+  console.log('📋 Submission details:', {
+    assignmentId,
+    classId,
+    textLength: submissionText.length,
+    filesCount: filesInput?.files?.length || 0,
+    isResubmit
+  });
+
+  // ✅ Show resubmit confirmation ONLY when actually submitting
+  if (isResubmit && previousSubmitDate) {
+    const confirmResubmit = confirm(
+      `⚠️ You have already submitted this assignment.\n\n` +
+      `Submitted on: ${new Date(previousSubmitDate).toLocaleString()}\n\n` +
+      `Do you want to resubmit? This will replace your previous submission.`
+    );
+    if (!confirmResubmit) {
+      console.log('User cancelled resubmission');
+      return;
     }
+  }
 
-    const assignmentId = modal.dataset.assignmentId;
-    const classId = modal.dataset.classId || currentClassId;
-    const submissionText = document.getElementById('submission-text').value.trim();
-    const filesInput = document.getElementById('submission-files');
+  // ✅ Validation
+  if (!assignmentId || !classId) {
+    alert('❌ Error: Missing assignment or class information. Please close and reopen the submission form.');
+    return;
+  }
 
-    console.log('📋 Submission details:', {
-        assignmentId,
-        classId,
-        textLength: submissionText.length,
-        filesCount: filesInput?.files?.length || 0
+  if (!submissionText && (!filesInput || !filesInput.files || filesInput.files.length === 0)) {
+    alert('⚠️ Please provide either submission text or upload files');
+    return;
+  }
+
+  // ✅ Get submit button and disable it IMMEDIATELY
+  const submitBtn = document.getElementById('submit-assignment');
+  if (!submitBtn) {
+    alert('❌ Error: Submit button not found');
+    return;
+  }
+
+  // ✅ Prevent double submission
+  if (submitBtn.disabled) {
+    console.log('⚠️ Submission already in progress');
+    return;
+  }
+
+  const originalText = submitBtn.innerHTML;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+
+  try {
+    // ✅ Verify assignment still exists in database
+    const verifyResponse = await fetch(`/api/professor/classes/${classId}/assignments`);
+    if (verifyResponse.ok) {
+      const assignments = await verifyResponse.json();
+      const assignment = assignments.find(a => String(a.id) === String(assignmentId));
+      
+      if (!assignment) {
+        throw new Error('Assignment not found. It may have been deleted by your professor.');
+      }
+      
+      // Check deadline again (but allow submission)
+      const dueDate = new Date(assignment.dueDate);
+      const now = new Date();
+      if (now > dueDate) {
+        console.log('⚠️ Submitting past deadline');
+      }
+    }
+  } catch (e) {
+    console.error('❌ Error verifying assignment:', e);
+    alert('❌ ' + e.message);
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalText;
+    return;
+  }
+
+  // Prepare submission data
+  const submissionData = {
+    assignment_id: assignmentId,
+    class_id: classId,
+    content: submissionText,
+    files: []
+  };
+
+  // Handle file uploads
+  if (filesInput && filesInput.files && filesInput.files.length > 0) {
+    console.log(`📎 Uploading ${filesInput.files.length} file(s)...`);
+    
+    try {
+      for (let i = 0; i < filesInput.files.length; i++) {
+        const file = filesInput.files[i];
+        console.log(`⬆️ Uploading file ${i + 1}/${filesInput.files.length}: ${file.name}`);
+        
+        submitBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Uploading ${i + 1}/${filesInput.files.length}...`;
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/upload_file', {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Failed to upload ${file.name}`);
+        }
+        
+        const result = await response.json();
+        submissionData.files.push({
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          url: result.url
+        });
+        
+        console.log(`✅ File uploaded: ${file.name}`);
+      }
+    } catch (uploadError) {
+      console.error('❌ File upload error:', uploadError);
+      alert(`❌ Error uploading files: ${uploadError.message}`);
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = originalText;
+      return;
+    }
+  }
+
+  // Submit to backend
+  try {
+    console.log('💾 Saving submission to database...');
+    
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+    
+    const response = await fetch('/api/student/submit_assignment', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(submissionData)
     });
 
-    // Validation
-    if (!assignmentId) {
-        alert('❌ Error: Assignment not found. Please reopen the submission form.');
-        return;
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || 'Failed to save submission');
     }
 
-    if (!submissionText && (!filesInput || !filesInput.files || filesInput.files.length === 0)) {
-        alert('⚠️ Please provide either submission text or upload files');
-        return;
+    console.log('✅ Submission saved successfully:', result);
+
+    // Close modal
+    modal.style.display = 'none';
+    document.getElementById('submission-text').value = '';
+    document.getElementById('submission-files').value = '';
+    document.getElementById('submission-files-chosen').textContent = 'No files selected';
+
+    // ✅ Clear modal data
+    modal.dataset.assignmentId = '';
+    modal.dataset.classId = '';
+    modal.dataset.isResubmit = '';
+    modal.dataset.previousSubmitDate = '';
+
+    // ✅ Re-enable button
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalText;
+
+    // ✅ Force reload from database
+    await loadEnrolledClasses();
+
+    // ✅ If viewing this class, refresh it
+    if (currentClassId === classId) {
+      const currentClass = enrolledClasses.find(c => c.id === currentClassId);
+      if (currentClass) {
+        await loadClassDataFromDatabase(currentClass);
+        loadClassAssignments();
+      }
     }
 
-    // Get fresh assignment data
-    const classItem = enrolledClasses.find(c => String(c.id) === String(classId));
-    if (!classItem) {
-        alert('❌ Error: Class not found');
-        return;
+    // ✅ Show success
+    showSuccessToast('Assignment Submitted!', 'Your submission has been saved successfully');
+
+    // Add notification
+    const classItem = enrolledClasses.find(c => c.id === classId);
+    if (classItem) {
+      addNotification(
+        'submission',
+        'Assignment Submitted',
+        `Successfully submitted to ${classItem.name}`,
+        `class:${classId}`
+      );
     }
 
-    // Check if assignment is still available and not overdue
-    const professorClasses = localStorage.getItem('professor_classes');
-    let assignment = null;
+    // Refresh data
+    await refreshStudentData();
+
+  } catch (error) {
+    console.error('❌ Submission error:', error);
+    alert(`❌ Failed to submit assignment: ${error.message}`);
     
-    if (professorClasses) {
-        try {
-            const profClasses = JSON.parse(professorClasses);
-            const matchingClass = profClasses.find(pc => pc.code === classItem.code);
-            if (matchingClass && matchingClass.assignments) {
-                assignment = matchingClass.assignments.find(a => String(a.id) === String(assignmentId));
-            }
-        } catch (e) {
-            console.error('Error loading professor data:', e);
-        }
-    }
-
-    if (!assignment) {
-        alert('❌ Error: Assignment not found or has been deleted by professor');
-        return;
-    }
-
-    // Check deadline
-    const dueDate = new Date(assignment.dueDate);
-    const now = new Date();
-    if (now > dueDate) {
-        alert(`⏰ This assignment is overdue!\n\nDeadline was: ${dueDate.toLocaleString()}`);
-        return;
-    }
-
-    // Prepare submission data
-    const submissionData = {
-        assignment_id: assignmentId,
-        class_id: classId,
-        content: submissionText,
-        files: []
-    };
-
-    // Handle file uploads
-    if (filesInput && filesInput.files && filesInput.files.length > 0) {
-        console.log(`📎 Uploading ${filesInput.files.length} file(s)...`);
-        
-        try {
-            for (let i = 0; i < filesInput.files.length; i++) {
-                const file = filesInput.files[i];
-                console.log(`⬆️ Uploading file ${i + 1}/${filesInput.files.length}: ${file.name}`);
-                
-                const formData = new FormData();
-                formData.append('file', file);
-                
-                const response = await fetch('/api/upload_file', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || `Failed to upload ${file.name}`);
-                }
-                
-                const result = await response.json();
-                submissionData.files.push({
-                    name: file.name,
-                    type: file.type,
-                    size: file.size,
-                    url: result.url
-                });
-                
-                console.log(`✅ File uploaded: ${file.name}`);
-            }
-        } catch (uploadError) {
-            console.error('❌ File upload error:', uploadError);
-            alert(`❌ Error uploading files: ${uploadError.message}`);
-            return;
-        }
-    }
-
-    // Submit to backend
-    try {
-        console.log('💾 Saving submission to database...');
-        
-        const response = await fetch('/api/student/submit_assignment', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(submissionData)
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.error || 'Failed to save submission');
-        }
-
-        console.log('✅ Submission saved successfully:', result);
-
-        // Close modal
-        modal.style.display = 'none';
-        document.getElementById('submission-text').value = '';
-        document.getElementById('submission-files').value = '';
-        document.getElementById('submission-files-chosen').textContent = 'No files selected';
-
-        // ✅ Force reload from database
-        await loadEnrolledClasses();
-
-        // ✅ If viewing this class, refresh it
-        if (currentClassId === classId) {
-          const currentClass = enrolledClasses.find(c => c.id === currentClassId);
-          if (currentClass) {
-            await loadClassDataFromDatabase(currentClass);
-            loadClassAssignments();
-          }
-        }
-
-        // ✅ Show success
-        showSuccessMessage(`Assignment submitted successfully to ${classItem.name}!`);
-
-        // Add notification
-        addNotification(
-          'submission',
-          'Assignment Submitted',
-          `Successfully submitted "${assignment.title}"`,
-          `class:${classId}`
-        );
-
-        // Refresh data
-        await refreshStudentData();
-
-    } catch (error) {
-        console.error('❌ Submission error:', error);
-        alert(`❌ Failed to submit assignment: ${error.message}`);
-    }
+    // Re-enable button
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalText;
+  }
 }
+
 
 // Add this helper function
 async function refreshStudentData() {
@@ -2691,7 +2885,8 @@ function viewSubmission(assignmentId) {
   
   const dueDate = new Date(assignment.dueDate);
   const isPastDue = new Date() > dueDate;
-  const isGraded = submission.grade !== undefined;
+  const isGraded = submission.grade !== undefined && submission.grade !== null;
+  const isArchived = classItem.archived || false;
   
   // ✅ Remove existing modal first
   const existingModal = document.getElementById('view-submission-modal');
@@ -2799,7 +2994,8 @@ function viewSubmission(assignmentId) {
     `;
   }
   
-  if (!isGraded && !isPastDue) {
+  // ✅ FIX: Add unsubmit button with proper conditions
+  if (!isGraded && !isPastDue && !isArchived) {
     modalHTML += `
       <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 2px solid #e0e0e0;">
         <button onclick="unsubmitAssignment('${assignmentId}')" 
@@ -2822,6 +3018,12 @@ function viewSubmission(assignmentId) {
     modalHTML += `
       <div style="margin-top: 1rem; text-align: center; color: #666; font-size: 0.9rem;">
         <i class="fas fa-lock"></i> Cannot unsubmit - deadline has passed
+      </div>
+    `;
+  } else if (isArchived) {
+    modalHTML += `
+      <div style="margin-top: 1rem; text-align: center; color: #666; font-size: 0.9rem;">
+        <i class="fas fa-archive"></i> Cannot unsubmit - class is archived
       </div>
     `;
   }
@@ -2850,34 +3052,38 @@ function closeViewSubmissionModal() {
   }
 }
 
-// 📍 FIND THIS FUNCTION (around line 2050):
 async function unsubmitAssignment(assignmentId) {
-  if (!confirm('Are you sure you want to unsubmit this assignment?')) {
+  if (!confirm('⚠️ Are you sure you want to unsubmit this assignment?\n\nThis will remove your submission and you can submit again before the deadline.')) {
     return;
   }
+  
+  console.log('🔄 Unsubmitting assignment:', assignmentId);
   
   try {
     const response = await fetch('/api/student/unsubmit_assignment', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        assignment_id: assignmentId,
-        class_id: currentClassId
+        assignment_id: String(assignmentId),
+        class_id: String(currentClassId)
       })
     });
     
+    const result = await response.json();
+    
     if (!response.ok) {
-      const result = await response.json();
       throw new Error(result.error || 'Failed to unsubmit');
     }
+    
+    console.log('✅ Unsubmitted successfully');
+    
+    // Close view submission modal
+    closeViewSubmissionModal();
     
     // ✅ Force reload from database
     await loadEnrolledClasses();
     
-    // Close modal
-    closeViewSubmissionModal();
-    
-    // Refresh class view
+    // Refresh class view if open
     if (currentClassId) {
       const currentClass = enrolledClasses.find(c => c.id === currentClassId);
       if (currentClass) {
@@ -2886,10 +3092,16 @@ async function unsubmitAssignment(assignmentId) {
       }
     }
     
-    showSuccessMessage('Assignment unsubmitted successfully!');
+    // Refresh all assignments view
+    await loadAllAssignments();
+    
+    // Update stats
+    updateDashboardStats();
+    
+    showSuccessToast('Assignment Unsubmitted!', 'You can now resubmit this assignment');
     
   } catch (error) {
-    console.error('Error unsubmitting:', error);
+    console.error('❌ Error unsubmitting:', error);
     alert('❌ ' + error.message);
   }
 }
@@ -3928,23 +4140,23 @@ if ("Notification" in window && Notification.permission === "default") {
   Notification.requestPermission();
 }
 
-// ✅ NEW: Enhanced downloadFile function with VIDEO PLAYER support
 function downloadFile(filename, urlOrContent) {
   console.log('📥 Downloading/Playing file:', filename);
   
-  // ✅ CHECK IF IT'S A VIDEO FILE
+  // Check if it's a video file
   const videoExtensions = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'];
   const fileExtension = filename.split('.').pop().toLowerCase();
   const isVideo = videoExtensions.includes(fileExtension);
   
-  // ✅ IF VIDEO, SHOW PLAYER MODAL
-  if (isVideo && urlOrContent && urlOrContent.startsWith('/uploads/')) {
+  // ✅ If video, show player instead of downloading
+  if (isVideo) {
     showVideoPlayer(filename, urlOrContent);
     return;
   }
   
-  // Regular file download for non-video files
+  // ✅ For regular files, trigger download
   if (urlOrContent && urlOrContent.startsWith('/uploads/')) {
+    // Server-hosted file
     const link = document.createElement('a');
     link.href = urlOrContent;
     link.download = filename;
@@ -3961,6 +4173,7 @@ function downloadFile(filename, urlOrContent) {
   }
   
   if (urlOrContent && urlOrContent.startsWith('data:')) {
+    // Base64 encoded file
     try {
       const link = document.createElement('a');
       link.href = urlOrContent;
@@ -3984,8 +4197,10 @@ function downloadFile(filename, urlOrContent) {
   alert('⚠️ Invalid file format. Please contact your professor.');
 }
 
-// ✅ NEW: Video player modal function
+// ✅ Enhanced Video Player with better controls
 function showVideoPlayer(filename, videoUrl) {
+  console.log('🎬 Opening video player:', filename);
+  
   const existingModal = document.getElementById('video-player-modal');
   if (existingModal) {
     existingModal.remove();
@@ -4009,7 +4224,6 @@ function showVideoPlayer(filename, videoUrl) {
         <video 
           id="assignment-video-player" 
           controls 
-          controlsList="nodownload"
           style="width: 100%; max-height: 70vh; display: block;"
           autoplay>
           <source src="${videoUrl}" type="video/${filename.split('.').pop()}">
@@ -4052,7 +4266,6 @@ function showVideoPlayer(filename, videoUrl) {
   document.addEventListener('keydown', videoKeyboardHandler);
 }
 
-// ✅ Close video player
 function closeVideoPlayer() {
   const modal = document.getElementById('video-player-modal');
   if (modal) {
@@ -4065,7 +4278,6 @@ function closeVideoPlayer() {
   }
 }
 
-// ✅ Toggle play/pause
 function togglePlayPause() {
   const video = document.getElementById('assignment-video-player');
   const icon = document.getElementById('play-pause-icon');
@@ -4082,7 +4294,6 @@ function togglePlayPause() {
   }
 }
 
-// ✅ Toggle fullscreen
 function toggleFullscreen() {
   const video = document.getElementById('assignment-video-player');
   
@@ -4101,13 +4312,11 @@ function toggleFullscreen() {
   }
 }
 
-// ✅ Change playback speed
 function changePlaybackSpeed(delta) {
   const video = document.getElementById('assignment-video-player');
   const speedDisplay = document.getElementById('playback-speed');
   
   let newSpeed = video.playbackRate + delta;
-  
   newSpeed = Math.max(0.25, Math.min(2.0, newSpeed));
   
   video.playbackRate = newSpeed;
