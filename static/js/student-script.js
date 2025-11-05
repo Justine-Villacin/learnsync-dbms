@@ -744,7 +744,6 @@ async function loadAvatarFromDatabase() {
       if (data.avatar && profileAvatar && topbarAvatar) {
         profileAvatar.src = data.avatar;
         topbarAvatar.src = data.avatar;
-        // Also save to localStorage as cache
         localStorage.setItem(`${userType}_avatar`, data.avatar);
       }
     }
@@ -759,11 +758,11 @@ if (studentData && studentData.id) {
 }
 
 // Load from localStorage as fallback (instant display while fetching from DB)
-const savedAvatar = localStorage.getItem(`${userType}_avatar`);
-if (savedAvatar && profileAvatar && topbarAvatar) {
-  profileAvatar.src = savedAvatar;
-  topbarAvatar.src = savedAvatar;
-}
+ const savedAvatar = localStorage.getItem(`${userType}_avatar`);
+  if (savedAvatar && profileAvatar && topbarAvatar) {
+    profileAvatar.src = savedAvatar;
+    topbarAvatar.src = savedAvatar;
+  }
 
 if (avatarUpload && profileAvatar && topbarAvatar) {
   const newAvatarUpload = avatarUpload.cloneNode(true);
@@ -787,47 +786,27 @@ if (avatarUpload && profileAvatar && topbarAvatar) {
     reader.onload = async function(e) {
       const avatarData = e.target.result;
       
-      // ✅ Update UI immediately
       profileAvatar.src = avatarData;
       topbarAvatar.src = avatarData;
       
       try {
-        // ✅ Save to DATABASE (not just localStorage)
         const response = await fetch('/api/profile/update-avatar', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            avatar: avatarData
-          })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ avatar: avatarData })
         });
         
         if (!response.ok) {
           throw new Error('Failed to save avatar');
         }
         
-        const result = await response.json();
-        console.log('✅ Avatar saved to database:', result);
-        
-        // ✅ Also save to localStorage as cache
         localStorage.setItem(`${userType}_avatar`, avatarData);
-        
-        showSuccessToast('Profile Picture Updated!', 'Your avatar has been saved and is now visible to professors');
+        showSuccessToast('Profile Picture Updated!', 'Your avatar has been saved');
         
       } catch (error) {
-        console.error('❌ Error saving avatar:', error);
-        
-        if (error.name === 'QuotaExceededError') {
-          alert('Storage full. Please choose a smaller image.');
-        } else {
-          alert('Error saving avatar: ' + error.message);
-        }
+        console.error('Error saving avatar:', error);
+        alert('Error saving avatar: ' + error.message);
       }
-    };
-    
-    reader.onerror = function() {
-      alert('Error reading file. Please try again.');
     };
     
     reader.readAsDataURL(file);
@@ -1341,23 +1320,24 @@ async function forceReloadClassData() {
 }
 
 // ✅ FIX #2: Check for new assignments and notify
-// âœ… FIX #2: Check for new assignments and notify with accurate data
 function checkForNewAssignments() {
   const lastCheck = localStorage.getItem('student_last_assignment_check');
-  const lastCheckTime = lastCheck ? new Date(lastCheck) : new Date(0);
+  const lastCheckTime = lastCheck ? new Date(lastCheck) : new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
   const now = new Date();
   
   let newAssignments = 0;
   let newMaterials = 0;
+  const notifiedItems = new Set(JSON.parse(localStorage.getItem('student_notified_items') || '[]'));
   
   enrolledClasses.forEach(classItem => {
     if (classItem.assignments) {
       classItem.assignments.forEach(assignment => {
         const assignmentDate = new Date(assignment.dateCreated || assignment.dueDate);
+        const notificationKey = `assignment-${assignment.id}`;
         
-        if (assignmentDate > lastCheckTime) {
+        if (assignmentDate > lastCheckTime && !notifiedItems.has(notificationKey)) {
           newAssignments++;
-          console.log(`📢 New assignment: ${assignment.title} in ${classItem.name}`);
+          notifiedItems.add(notificationKey);
           
           addNotification(
             'assignment',
@@ -1372,10 +1352,11 @@ function checkForNewAssignments() {
     if (classItem.materials) {
       classItem.materials.forEach(material => {
         const materialDate = new Date(material.date);
+        const notificationKey = `material-${material.id}`;
         
-        if (materialDate > lastCheckTime) {
+        if (materialDate > lastCheckTime && !notifiedItems.has(notificationKey)) {
           newMaterials++;
-          console.log(`📢 New material: ${material.title} in ${classItem.name}`);
+          notifiedItems.add(notificationKey);
           
           addNotification(
             'material',
@@ -1388,7 +1369,7 @@ function checkForNewAssignments() {
     }
   });
   
-  console.log(`📊 Notification check: ${newAssignments} new assignments, ${newMaterials} new materials`);
+  localStorage.setItem('student_notified_items', JSON.stringify([...notifiedItems]));
   localStorage.setItem('student_last_assignment_check', now.toISOString());
 }
 
@@ -3838,12 +3819,18 @@ function calculateDashboardStats() {
           completedAssignments++;
           
           // ✅ Calculate grades
-          // ✅ FIX: Calculate grades properly
-          if (submission.grade !== undefined && submission.grade !== null) {
+          // ✅ FIX: Only count as graded if grade is actually set
+          if (submission && submission.grade !== undefined && submission.grade !== null && submission.grade >= 0) {
             totalEarned += submission.grade;
             totalPossible += assignment.points;
             gradedCount++;
+            completedAssignments++; // Only increment completed when graded
             console.log(`📊 Grade found: ${submission.grade}/${assignment.points}`);
+          
+          } else if (submission) {
+            // Submitted but not graded yet
+            completedAssignments++;
+            console.log(`✅ Submitted (not graded): ${assignment.title}`);
           }
           
           console.log(`✅ Completed: ${assignment.title}`);

@@ -2810,7 +2810,6 @@ async function openClass(classId, isArchived = false) {
         classItem = archivedClasses.find(c => String(c.id) === String(classId));
         
         if (classItem) {
-          // ✅ Load complete data for archived class
           await loadClassDataFromDatabase(classItem);
           displayArchivedClassView(classItem);
           return;
@@ -2820,11 +2819,6 @@ async function openClass(classId, isArchived = false) {
       console.error('Error loading archived class:', error);
     }
     
-    alert('❌ Class not found');
-    return;
-  }
-  
-  if (!classItem) {
     alert('❌ Class not found');
     return;
   }
@@ -6475,3 +6469,57 @@ style.textContent = `
 document.head.appendChild(style);
 
 // Run this in browser console on both dashboards:
+
+
+function checkForNewAssignments() {
+  const lastCheck = localStorage.getItem('student_last_assignment_check');
+  const lastCheckTime = lastCheck ? new Date(lastCheck) : new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
+  const now = new Date();
+  
+  let newAssignments = 0;
+  let newMaterials = 0;
+  const notifiedItems = new Set(JSON.parse(localStorage.getItem('student_notified_items') || '[]'));
+  
+  enrolledClasses.forEach(classItem => {
+    if (classItem.assignments) {
+      classItem.assignments.forEach(assignment => {
+        const assignmentDate = new Date(assignment.dateCreated || assignment.dueDate);
+        const notificationKey = `assignment-${assignment.id}`;
+        
+        if (assignmentDate > lastCheckTime && !notifiedItems.has(notificationKey)) {
+          newAssignments++;
+          notifiedItems.add(notificationKey);
+          
+          addNotification(
+            'assignment',
+            'New Assignment Posted',
+            `"${assignment.title}" in ${classItem.name}`,
+            `class:${classItem.id}`
+          );
+        }
+      });
+    }
+    
+    if (classItem.materials) {
+      classItem.materials.forEach(material => {
+        const materialDate = new Date(material.date);
+        const notificationKey = `material-${material.id}`;
+        
+        if (materialDate > lastCheckTime && !notifiedItems.has(notificationKey)) {
+          newMaterials++;
+          notifiedItems.add(notificationKey);
+          
+          addNotification(
+            'material',
+            'New Material Uploaded',
+            `"${material.title}" in ${classItem.name}`,
+            `class:${classItem.id}`
+          );
+        }
+      });
+    }
+  });
+  
+  localStorage.setItem('student_notified_items', JSON.stringify([...notifiedItems]));
+  localStorage.setItem('student_last_assignment_check', now.toISOString());
+}
