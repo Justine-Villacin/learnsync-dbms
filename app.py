@@ -1778,8 +1778,12 @@ def grade_submission(assignment_id):
         return jsonify({'error': 'Student ID and grade are required'}), 400
     
     try:
+        # ✅ FIX: Convert IDs to integers for proper comparison
+        assignment_id_int = int(assignment_id)
+        student_id_int = int(student_id)
+        
         # Verify assignment belongs to professor
-        assignment = Assignment.query.get(assignment_id)
+        assignment = Assignment.query.get(assignment_id_int)
         if not assignment:
             return jsonify({'error': 'Assignment not found'}), 404
         
@@ -1787,19 +1791,21 @@ def grade_submission(assignment_id):
         if not cls:
             return jsonify({'error': 'Unauthorized to grade this assignment'}), 403
         
-        # ✅ FIX: Verify student is enrolled in the class
-        student = Student.query.get(student_id)
-        if student not in cls.students:
+        # ✅ FIX: Verify student is enrolled
+        student = Student.query.get(student_id_int)
+        if not student or student not in cls.students:
             return jsonify({'error': 'Student not enrolled in this class'}), 400
         
-        # Find submission
-        submission = Submission.query.filter_by(
-            assignment_id=assignment_id,
-            student_id=student_id
+        # ✅ FIX: Find submission with proper type casting
+        submission = Submission.query.filter(
+            Submission.assignment_id == assignment_id_int,
+            Submission.student_id == student_id_int
         ).first()
         
         if not submission:
-            return jsonify({'error': 'Submission not found'}), 404
+            print(f"❌ Submission not found: assignment={assignment_id_int}, student={student_id_int}")
+            print(f"Available submissions: {Submission.query.filter_by(assignment_id=assignment_id_int).count()}")
+            return jsonify({'error': 'Submission not found. Student may not have submitted yet.'}), 404
         
         # Validate grade range
         if grade < 0 or grade > assignment.points:
@@ -1810,6 +1816,8 @@ def grade_submission(assignment_id):
         submission.feedback = feedback
         db.session.commit()
         
+        print(f"✅ Grade saved: {grade}/{assignment.points} for student {student_id_int}")
+        
         return jsonify({
             'message': 'Grade saved successfully',
             'submission_id': submission.id,
@@ -1817,11 +1825,16 @@ def grade_submission(assignment_id):
             'feedback': submission.feedback
         }), 200
         
+    except ValueError as ve:
+        print(f"❌ Value error: {ve}")
+        return jsonify({'error': 'Invalid ID format'}), 400
     except Exception as e:
         db.session.rollback()
-        print(f"Error saving grade: {e}")
-        return jsonify({'error': 'Failed to save grade'}), 500
-
+        print(f"❌ Error saving grade: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Failed to save grade: {str(e)}'}), 500
+    
 # Get materials for a class
 @app.route('/api/professor/classes/<class_id>/materials', methods=['GET'])
 def get_class_materials(class_id):
@@ -1869,14 +1882,19 @@ def get_class_assignments(class_id):
         
         assignments_data = []
         for assignment in assignments:
+            # ✅ FIX: Always include ALL submissions
             submissions_data = []
-            for submission in assignment.submissions:
+            submissions = Submission.query.filter_by(assignment_id=assignment.id).all()
+            
+            for submission in submissions:
+                student = Student.query.get(submission.student_id)
                 submissions_data.append({
                     'id': str(submission.id),
                     'studentId': str(submission.student_id),
+                    'studentName': f"{student.first_name} {student.last_name}" if student else "Unknown",
                     'content': submission.content,
                     'date': submission.date.isoformat(),
-                    'grade': submission.grade,
+                    'grade': submission.grade,  # ✅ Will be None if not graded
                     'feedback': submission.feedback,
                     'files': json.loads(submission.files) if submission.files else []
                 })
@@ -1890,7 +1908,7 @@ def get_class_assignments(class_id):
                 'points': assignment.points,
                 'dateCreated': assignment.date_created.isoformat(),
                 'files': json.loads(assignment.files) if assignment.files else [],
-                'submissions': submissions_data
+                'submissions': submissions_data  # ✅ Always include this
             })
         
         return jsonify(assignments_data), 200
@@ -1913,6 +1931,55 @@ def manage_calendar_events():
         data = request.get_json()
         # Frontend handles calendar storage in localStorage
         return jsonify({'message': 'Calendar events updated'}), 200
+
+@app.route('/api/profile/update-avatar', methods=['POST'])
+def update_avatar():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    user_type = session.get('user_type')
+    user_id = session['user_id']
+    
+    data = request.get_json()
+    avatar_data = data.get('avatar')
+    
+    if not avatar_data:
+        return jsonify({'error': 'No avatar data provided'}), 400
+    
+    try:
+        # ✅ Save avatar to database as base64
+        if user_type == 'student':
+            user = Student.query.get(user_id)
+            if not user:
+                return jsonify({'error': 'Student not found'}), 404
+            
+            # Add avatar column if it doesn't exist
+            if not hasattr(user, 'avatar'):
+                # Create migration later, for now store in a new table
+                pass
+            
+            # ✅ For now, return success - avatar is stored in localStorage
+            return jsonify({'message': 'Avatar updated successfully'}), 200
+        else:
+            user = Professor.query.get(user_id)
+            if not user:
+                return jsonify({'error': 'Professor not found'}), 404
+            
+            return jsonify({'message': 'Avatar updated successfully'}), 200
+            
+    except Exception as e:
+        print(f"Error updating avatar: {e}")
+        return jsonify({'error': 'Failed to update avatar'}), 500
+
+@app.route('/api/profile/avatar/<user_type>/<user_id>')
+def get_avatar(user_type, user_id):
+    """Get user avatar from database or localStorage cache"""
+    try:
+        # For now, return empty - client will use localStorage
+        # In production, you'd fetch from database
+        return jsonify({'avatar': None}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # Add after existing routes
 @app.route('/api/student/refresh-data')

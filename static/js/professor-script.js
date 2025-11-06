@@ -319,6 +319,70 @@ function displaySearchResults(results, searchTerm) {
   searchResultsDropdown.classList.add('show');
 }
 
+// Handle file selection with preview and remove
+const assignmentFilesInput = document.getElementById('assignment-files');
+if (assignmentFilesInput) {
+  let selectedFiles = [];
+  
+  assignmentFilesInput.addEventListener('change', function(e) {
+    const newFiles = Array.from(e.target.files);
+    selectedFiles = [...selectedFiles, ...newFiles];
+    updateFilesList();
+  });
+  
+  function updateFilesList() {
+    const filesList = document.getElementById('selected-files-list');
+    const fileChosen = document.getElementById('assignment-files-chosen');
+    
+    if (selectedFiles.length === 0) {
+      fileChosen.textContent = 'No files selected';
+      filesList.innerHTML = '';
+      return;
+    }
+    
+    fileChosen.textContent = `${selectedFiles.length} file(s) selected`;
+    
+    filesList.innerHTML = selectedFiles.map((file, index) => `
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.75rem; background: #f8f9fa; border-radius: 6px; margin-bottom: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.75rem; flex: 1; min-width: 0;">
+          <i class="fas fa-${getFileIcon(file.name)}" style="color: #4a90a4; font-size: 1.2rem;"></i>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 500; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${file.name}</div>
+            <div style="font-size: 0.85rem; color: #666;">${(file.size / 1024 / 1024).toFixed(2)} MB</div>
+          </div>
+        </div>
+        <button type="button" onclick="removeFile(${index})" class="btn-danger btn-small" style="margin-left: 1rem;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+    `).join('');
+  }
+  
+  window.removeFile = function(index) {
+    selectedFiles.splice(index, 1);
+    updateFilesList();
+    
+    // Update the actual file input
+    const dt = new DataTransfer();
+    selectedFiles.forEach(file => dt.items.add(file));
+    assignmentFilesInput.files = dt.files;
+  };
+  
+  function getFileIcon(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    const icons = {
+      'pdf': 'file-pdf',
+      'doc': 'file-word', 'docx': 'file-word',
+      'txt': 'file-alt',
+      'png': 'file-image', 'jpg': 'file-image', 'jpeg': 'file-image', 'gif': 'file-image',
+      'zip': 'file-archive',
+      'mp4': 'file-video', 'avi': 'file-video', 'mov': 'file-video', 'wmv': 'file-video',
+      'flv': 'file-video', 'webm': 'file-video', 'mkv': 'file-video'
+    };
+    return icons[ext] || 'file';
+  }
+}
+
 function highlightText(text, searchTerm) {
   if (!text) return '';
   const regex = new RegExp(`(${searchTerm})`, 'gi');
@@ -1092,14 +1156,13 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Load classes from API
-// Load classes from API
 async function loadClasses() {
   try {
     const response = await fetch('/api/professor/classes');
     if (response.ok) {
       classes = await response.json();
       
-      // ✅ FIX: Load materials and assignments for each class
+      // ✅ FIX: Load materials, assignments, AND submissions for each class
       for (let classItem of classes) {
         if (!classItem.students) {
           classItem.students = [];
@@ -1118,11 +1181,12 @@ async function loadClasses() {
           classItem.materials = [];
         }
         
-        // Load assignments from database
+        // ✅ FIX: Load assignments WITH submissions from database
         try {
           const assignmentsResponse = await fetch(`/api/professor/classes/${classItem.id}/assignments`);
           if (assignmentsResponse.ok) {
             classItem.assignments = await assignmentsResponse.json();
+            console.log(`✅ Loaded ${classItem.assignments.length} assignments with submissions for ${classItem.name}`);
           } else {
             classItem.assignments = [];
           }
@@ -1245,9 +1309,21 @@ function renderClassList() {
   sortedClasses.forEach(classItem => {
     const classCard = document.createElement('div');
     classCard.className = 'class-card';
+    
+    // ✅ FIX: Calculate stats correctly from database data
     const studentCount = classItem.students ? classItem.students.length : 0;
     const materialsCount = classItem.materials ? classItem.materials.length : 0;
     const assignmentsCount = classItem.assignments ? classItem.assignments.length : 0;
+    
+    // ✅ FIX: Calculate total submissions across all assignments
+    let totalSubmissions = 0;
+    if (classItem.assignments) {
+      classItem.assignments.forEach(assignment => {
+        if (assignment.submissions && Array.isArray(assignment.submissions)) {
+          totalSubmissions += assignment.submissions.length;
+        }
+      });
+    }
 
     classCard.innerHTML = `
       <div class="class-card-header">
@@ -1259,6 +1335,7 @@ function renderClassList() {
         <span><i class="fas fa-users"></i> ${studentCount} Students</span>
         <span><i class="fas fa-file-alt"></i> ${materialsCount} Materials</span>
         <span><i class="fas fa-tasks"></i> ${assignmentsCount} Assignments</span>
+        <span><i class="fas fa-paper-plane"></i> ${totalSubmissions} Submissions</span>
       </div>
       <div class="class-actions">
         <button class="btn-primary" onclick="openClass('${classItem.id}')">Open Class</button>
@@ -1700,18 +1777,25 @@ function loadMissedTasks() {
 }
 
 // New function specifically for missed tasks student view
-function viewStudentInClass(classId, studentId) {
+async function viewStudentInClass(classId, studentId) {
   const classItem = classes.find(c => String(c.id) === String(classId));
   if (!classItem) {
-    alert('âŒ Class not found');
+    alert('❌ Class not found');
     return;
+  }
+  
+  // ✅ FIX: Load fresh class data first
+  try {
+    await loadClassDataFromDatabase(classItem);
+  } catch (e) {
+    console.error('Error loading class data:', e);
   }
   
   const student = classItem.students ? 
     classItem.students.find(s => String(s.id) === String(studentId)) : null;
   
   if (!student) {
-    alert('âŒ Student not found');
+    alert('❌ Student not found');
     return;
   }
   
@@ -2799,29 +2883,29 @@ function copyClassCode(code) {
 async function openClass(classId, isArchived = false) {
   currentClassId = classId;
   
-  let classItem = classes.find(c => c.id === classId);
+  let classItem = classes.find(c => String(c.id) === String(classId));
   
-  // ✅ FIX: If not found in active classes, check archived
-  if (!classItem && isArchived) {
-    try {
-      const response = await fetch('/api/professor/classes?archived=true');
-      if (response.ok) {
-        const archivedClasses = await response.json();
-        classItem = archivedClasses.find(c => String(c.id) === String(classId));
-        
-        if (classItem) {
-          await loadClassDataFromDatabase(classItem);
-          displayArchivedClassView(classItem);
-          return;
+  if (!classItem) {
+      // Try loading from archived classes
+      try {
+        const response = await fetch('/api/professor/classes?archived=true');
+        if (response.ok) {
+          const archivedClasses = await response.json();
+          classItem = archivedClasses.find(c => String(c.id) === String(classId));
+          
+          if (classItem) {
+            await loadClassDataFromDatabase(classItem);
+            displayArchivedClassView(classItem);
+            return;
+          }
         }
+      } catch (error) {
+        console.error('Error loading archived class:', error);
       }
-    } catch (error) {
-      console.error('Error loading archived class:', error);
+      
+      alert('❌ Class not found');
+      return;
     }
-    
-    alert('❌ Class not found');
-    return;
-  }
   
   // ✅ Load fresh data from database for active classes
   await loadClassDataFromDatabase(classItem);
@@ -3303,7 +3387,7 @@ async function deleteAssignment(assignmentId) {
   }
   
   try {
-    // ✅ DELETE FROM DATABASE FIRST (don't check local state)
+    // ✅ DELETE FROM DATABASE FIRST
     const response = await fetch(`/api/professor/assignments/${assignmentId}`, {
       method: 'DELETE'
     });
@@ -3315,7 +3399,7 @@ async function deleteAssignment(assignmentId) {
     
     console.log('✅ Assignment deleted from database');
     
-    // ✅ THEN update local state (if class exists)
+    // ✅ CLEAR FRONTEND CACHE COMPLETELY
     const classItem = classes.find(c => c.id === currentClassId);
     if (classItem && classItem.assignments) {
       classItem.assignments = classItem.assignments.filter(a => a.id !== assignmentId);
@@ -3327,28 +3411,17 @@ async function deleteAssignment(assignmentId) {
       }
     }
     
-    // Update localStorage cache (optional, may fail if storage full)
+    // ✅ CLEAR LOCALSTORAGE CACHE
     try {
-      const savedClasses = localStorage.getItem('professor_classes');
-      if (savedClasses) {
-        let localClasses = JSON.parse(savedClasses);
-        const localClassIndex = localClasses.findIndex(c => c.id === currentClassId);
-        
-        if (localClassIndex !== -1 && localClasses[localClassIndex].assignments) {
-          localClasses[localClassIndex].assignments = 
-            localClasses[localClassIndex].assignments.filter(a => a.id !== assignmentId);
-          localStorage.setItem('professor_classes', JSON.stringify(localClasses));
-        }
-      }
-    } catch (storageError) {
-      console.warn('⚠️ Could not update localStorage cache:', storageError);
-      // Continue anyway - database is source of truth
+      localStorage.removeItem('professor_classes'); // Force fresh load next time
+    } catch (e) {
+      console.warn('Could not clear localStorage:', e);
     }
     
-    // Reload from database to ensure sync
+    // ✅ RELOAD FROM DATABASE
     await loadClasses();
     
-    // Reload current class if viewing one
+    // ✅ REFRESH CURRENT CLASS VIEW
     if (currentClassId) {
       const currentClass = classes.find(c => c.id === currentClassId);
       if (currentClass) {
@@ -3731,8 +3804,13 @@ function loadClassAssignments(isArchived = false) {
   });
   
   sortedAssignments.forEach(assignment => {
-    const submissionCount = assignment.submissions ? assignment.submissions.length : 0;
-    const gradedCount = assignment.submissions ? assignment.submissions.filter(s => s.grade !== undefined).length : 0;
+    // ✅ FIX: Count submissions correctly from database
+  const submissionCount = assignment.submissions && Array.isArray(assignment.submissions) ? 
+      assignment.submissions.length : 0;
+    
+    const gradedCount = assignment.submissions && Array.isArray(assignment.submissions) ? 
+      assignment.submissions.filter(s => s.grade !== undefined && s.grade !== null).length : 0;
+    
     const dueDate = new Date(assignment.dueDate);
     const now = new Date();
     const isOverdue = dueDate < now;
@@ -3793,7 +3871,7 @@ function loadClassAssignments(isArchived = false) {
                 </button>
               ` : `
                 <button class="btn-primary" onclick="viewSubmissions('${assignment.id}')">
-                  <i class="fas fa-eye"></i> View Submissions (${submissionCount})
+                    <i class="fas fa-eye"></i> View Submissions (${submissionCount})
                 </button>
               `}
             </div>
@@ -4495,7 +4573,7 @@ function resetAssignmentForm() {
 // View assignment submissions with grading functionality
 async function viewSubmissions(assignmentId) {
   console.log('👀 Opening submissions for assignment:', assignmentId);
-  
+    
   const classItem = classes.find(c => c.id === currentClassId);
   if (!classItem) {
     alert('❌ Class not found');
@@ -4712,6 +4790,35 @@ async function viewSubmissions(assignmentId) {
   });
   
   console.log('✅ Submissions modal opened successfully');
+}
+
+// Add this new function to your JavaScript:
+async function refreshAndViewSubmissions(assignmentId) {
+    console.log('🔄 Force refreshing submissions for assignment:', assignmentId);
+    
+    try {
+        // Force refresh from database
+        const response = await fetch(`/api/professor/assignments/${assignmentId}/submissions`);
+        if (response.ok) {
+            const freshSubmissions = await response.json();
+            console.log('✅ Fresh submissions from DB:', freshSubmissions);
+            
+            // Update local state
+            const classItem = classes.find(c => c.id === currentClassId);
+            if (classItem && classItem.assignments) {
+                const assignment = classItem.assignments.find(a => String(a.id) === String(assignmentId));
+                if (assignment) {
+                    assignment.submissions = freshSubmissions;
+                    console.log(`✅ Updated ${freshSubmissions.length} submissions locally`);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error refreshing submissions:', error);
+    }
+    
+    // Now open the submissions view
+    viewSubmissions(assignmentId);
 }
 
 function openGradeModal(submissionId) {
@@ -6172,12 +6279,12 @@ async function loadAllStudents() {
   
   allStudentsList.innerHTML = '<div style="text-align: center; padding: 2rem;"><i class="fas fa-spinner fa-spin" style="font-size: 2rem;"></i><p>Loading students...</p></div>';
   
-  const studentMap = new Map();
+  const studentMap = new Map(); // ✅ Use Map to prevent duplicates
   
   classes.forEach(classItem => {
     if (classItem.students && classItem.students.length > 0) {
       classItem.students.forEach(student => {
-        const studentKey = student.id || student.student_id;
+        const studentKey = String(student.id || student.student_id); // ✅ Use string key
         if (!studentMap.has(studentKey)) {
           studentMap.set(studentKey, {
             ...student,
@@ -6186,8 +6293,10 @@ async function loadAllStudents() {
           });
         } else {
           const existingStudent = studentMap.get(studentKey);
-          existingStudent.classes.push(classItem.name);
-          existingStudent.classIds.push(classItem.id);
+          if (!existingStudent.classes.includes(classItem.name)) { // ✅ Prevent duplicate class names
+            existingStudent.classes.push(classItem.name);
+            existingStudent.classIds.push(classItem.id);
+          }
         }
       });
     }

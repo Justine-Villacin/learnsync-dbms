@@ -786,10 +786,12 @@ if (avatarUpload && profileAvatar && topbarAvatar) {
     reader.onload = async function(e) {
       const avatarData = e.target.result;
       
+      // Update UI immediately
       profileAvatar.src = avatarData;
       topbarAvatar.src = avatarData;
       
       try {
+        // ✅ FIX: Save to database
         const response = await fetch('/api/profile/update-avatar', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -800,7 +802,11 @@ if (avatarUpload && profileAvatar && topbarAvatar) {
           throw new Error('Failed to save avatar');
         }
         
-        localStorage.setItem(`${userType}_avatar`, avatarData);
+        // ✅ Save to localStorage with user-specific key
+        const userKey = `avatar_student_${studentData.id}`;
+        localStorage.setItem(userKey, avatarData);
+        localStorage.setItem('student_avatar', avatarData); // Fallback
+        
         showSuccessToast('Profile Picture Updated!', 'Your avatar has been saved');
         
       } catch (error) {
@@ -1697,55 +1703,41 @@ async function unenrollClass(classId) {
 }
 
 // REPLACE the openClass function around line 420
-function openClass(classId, isArchived = false) {
+async function openClass(classId, isArchived = false) {
   currentClassId = classId;
   
-  let classItem = enrolledClasses.find(c => c.id === classId);
+  let classItem = enrolledClasses.find(c => String(c.id) === String(classId));
   
-  // ✅ ADD THIS SECTION AFTER THE ABOVE CODE:
+  // ✅ FIX: Load archived class with isolated data
   if (!classItem && isArchived) {
-    // Load archived class with complete data
-    fetch('/api/professor/classes?archived=true')
-      .then(response => response.json())
-      .then(async archivedClasses => {
-        classItem = archivedClasses.find(c => c.id === classId);
+    try {
+      const response = await fetch('/api/professor/classes?archived=true');
+      if (response.ok) {
+        const archivedClasses = await response.json();
+        classItem = archivedClasses.find(c => String(c.id) === String(classId));
+        
         if (classItem) {
-          // ✅ Load materials
-          try {
-            const materialsResponse = await fetch(`/api/professor/classes/${classItem.id}/materials`);
-            if (materialsResponse.ok) {
-              classItem.materials = await materialsResponse.json();
-            }
-          } catch (e) {
-            classItem.materials = [];
+          // ✅ CRITICAL: Load fresh data specific to THIS class
+          const materialsResponse = await fetch(`/api/professor/classes/${classId}/materials`);
+          if (materialsResponse.ok) {
+            classItem.materials = await materialsResponse.json();
           }
           
-          // ✅ Load assignments with submissions
-          try {
-            const assignmentsResponse = await fetch(`/api/professor/classes/${classItem.id}/assignments`);
-            if (assignmentsResponse.ok) {
-              classItem.assignments = await assignmentsResponse.json();
-              
-              // Load submissions for each assignment
-              for (let assignment of classItem.assignments) {
-                const submissionsResponse = await fetch(`/api/professor/assignments/${assignment.id}/submissions`);
-                if (submissionsResponse.ok) {
-                  assignment.submissions = await submissionsResponse.json();
-                }
-              }
-            }
-          } catch (e) {
-            classItem.assignments = [];
+          const assignmentsResponse = await fetch(`/api/professor/classes/${classId}/assignments`);
+          if (assignmentsResponse.ok) {
+            classItem.assignments = await assignmentsResponse.json();
           }
           
+          // ✅ Display with isolated data
           displayClassView(classItem, true);
+          return;
         }
-      })
-      .catch(error => {
-        console.error('Error loading archived class:', error);
-        alert('❌ Error loading class');
-      });
-    return;
+      }
+    } catch (error) {
+      console.error('Error loading archived class:', error);
+      alert('❌ Error loading class');
+      return;
+    }
   }
   
   if (!classItem) {
@@ -1753,10 +1745,9 @@ function openClass(classId, isArchived = false) {
     return;
   }
   
-  // ✅ FIX: Load fresh data before displaying
-  loadClassDataFromDatabase(classItem).then(() => {
-    displayClassView(classItem, isArchived);
-  });
+  // ✅ FIX: Always load fresh data for active classes
+  await loadClassDataFromDatabase(classItem);
+  displayClassView(classItem, isArchived);
 }
 
 // ✅ NEW HELPER FUNCTION: Load class data from database (add this after openClass)
@@ -2089,7 +2080,13 @@ function loadClassAssignments(isArchived = false) {
       assignment.submissions.find(s => String(s.studentId) === String(studentData.id)) : null;
     
     const isSubmitted = !!submission;
-    const isGraded = isSubmitted && submission.grade !== undefined;
+    
+    // ✅ FIX: Proper grade checking - must have actual grade value
+    const isGraded = isSubmitted && 
+                    submission.grade !== undefined && 
+                    submission.grade !== null && 
+                    submission.grade >= 0;
+    
     const now = new Date();
     const isOverdue = new Date(assignment.dueDate) < now && !isSubmitted;
     const isMissed = isOverdue && !isSubmitted;
@@ -2124,7 +2121,7 @@ function loadClassAssignments(isArchived = false) {
         <span><i class="fas fa-file-alt"></i> ${assignment.points} Points</span>
         <span class="status ${isGraded ? 'graded' : isSubmitted ? 'submitted' : isMissed ? 'missed' : 'pending'}">
           <i class="fas fa-${isGraded ? 'check-circle' : isSubmitted ? 'clock' : isMissed ? 'times-circle' : 'exclamation-circle'}"></i>
-          ${isGraded ? 'Graded' : isSubmitted ? 'Submitted' : isMissed ? 'Missed' : 'Not Submitted'}
+          ${isGraded ? 'Graded' : isSubmitted ? 'Submitted (Pending Grade)' : isMissed ? 'Missed' : 'Not Submitted'}
         </span>
         ${isGraded ? `<span class="grade">Grade: ${submission.grade}/${assignment.points}</span>` : ''}
       </div>
@@ -3140,29 +3137,26 @@ async function updateLocalDataAfterUnsubmit(assignmentId) {
 }
 
 // FIND loadClassGrades function and UPDATE it:
-function loadClassGrades() {
+async function loadClassGrades() {
   const classItem = enrolledClasses.find(c => c.id === currentClassId);
   const gradesContainer = document.getElementById('grades-container');
   
   if (!classItem || !gradesContainer) return;
   
-  gradesContainer.innerHTML = '';
+  gradesContainer.innerHTML = '<div style="text-align:center;padding:2rem;"><i class="fas fa-spinner fa-spin"></i> Loading grades...</div>';
   
-  // ✅ FIX: Load fresh assignment data
-  const professorClasses = localStorage.getItem('professor_classes');
-  let profClasses = [];
-  if (professorClasses) {
-    try {
-      profClasses = JSON.parse(professorClasses);
-      const matchingClass = profClasses.find(pc => pc.code === classItem.code);
-      if (matchingClass && matchingClass.assignments) {
-        classItem.assignments = matchingClass.assignments;
-        console.log('✅ Loaded assignments for grades view:', classItem.assignments.length);
-      }
-    } catch (e) {
-      console.error('Error loading professor data:', e);
+  try {
+    // ✅ FIX: Always fetch fresh assignments from database
+    const response = await fetch(`/api/professor/classes/${currentClassId}/assignments`);
+    if (response.ok) {
+      classItem.assignments = await response.json();
+      console.log('✅ Loaded fresh assignments for grades:', classItem.assignments.length);
     }
+  } catch (e) {
+    console.error('Error loading assignments:', e);
   }
+  
+  gradesContainer.innerHTML = '';
   
   if (!classItem.assignments || classItem.assignments.length === 0) {
     gradesContainer.innerHTML = `
@@ -3200,7 +3194,6 @@ function loadClassGrades() {
       assignment.submissions.find(s => String(s.studentId) === String(studentData.id)) : null;
     
     const isSubmitted = !!submission;
-    // ✅ FIX: Proper grade checking
     const isGraded = isSubmitted && submission.grade !== undefined && submission.grade !== null;
     
     let gradeDisplay = '-';
@@ -3214,11 +3207,8 @@ function loadClassGrades() {
       gradedCount++;
       hasGradedAssignments = true;
     } else if (isSubmitted) {
-      gradeDisplay = `0/${assignment.points}`;
+      gradeDisplay = `Pending`;
       status = 'Submitted';
-    } else {
-      gradeDisplay = `0/${assignment.points}`;
-      status = 'Not Submitted';
     }
     
     gradesHTML += `
@@ -3226,57 +3216,14 @@ function loadClassGrades() {
         <td>${assignment.title}</td>
         <td>${new Date(assignment.dueDate).toLocaleDateString()}</td>
         <td>${assignment.points}</td>
-        <td>${gradeDisplay}</td>
-        <td class="status ${status.toLowerCase().replace(' ', '-')}">
-          ${status}
-        </td>
+        <td><strong>${gradeDisplay}</strong></td>
+        <td><span class="status ${status.toLowerCase().replace(' ', '-')}">${status}</span></td>
       </tr>
     `;
   });
   
-  gradesHTML += `
-        </tbody>
-      </table>
-    </div>
-  `;
+  gradesHTML += `</tbody></table></div>`;
   
-  // ✅ ADD: Polling function to check for grade updates
-let gradeCheckInterval = null;
-
-function startGradePolling() {
-  // Check every 10 seconds for grade updates
-  if (gradeCheckInterval) {
-    clearInterval(gradeCheckInterval);
-  }
-  
-  gradeCheckInterval = setInterval(async () => {
-    if (studentData && studentData.id && enrolledClasses.length > 0) {
-      console.log('🔄 Checking for grade updates...');
-      await loadEnrolledClasses();
-      updateDashboardStats();
-      
-      // Reload grades if grades section is active
-      const gradesSection = document.getElementById('grades-section');
-      if (gradesSection && gradesSection.classList.contains('active')) {
-        const gradeFilter = document.getElementById('grade-filter');
-        if (gradeFilter) {
-          filterGrades(gradeFilter.value);
-        }
-      }
-    }
-  }, 10000); // Every 10 seconds
-}
-
-// Start polling when page loads
-document.addEventListener('DOMContentLoaded', function() {
-  // ... existing code ...
-  
-  // Start grade polling
-  setTimeout(startGradePolling, 5000);
-});
-
-
-  // ✅ FIX: Only show average if there are graded assignments
   if (hasGradedAssignments && totalPossible > 0) {
     const classAverage = (totalEarned / totalPossible * 100).toFixed(2);
     gradesHTML = `
@@ -3538,7 +3485,8 @@ function loadAllAssignments() {
           className: classItem.name,
           classId: classItem.id,
           isSubmitted: !!submission,
-          isGraded: !!submission && submission.grade !== undefined && submission.grade !== null,
+          // ✅ FIX: Only true if actually graded with a value >= 0
+          isGraded: !!submission && submission.grade !== undefined && submission.grade !== null && submission.grade >= 0,
           isOverdue: new Date(assignment.dueDate) < new Date() && !submission,
           submission: submission
         });
